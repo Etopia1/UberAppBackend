@@ -96,7 +96,8 @@ exports.sendMessage = async (req, res) => {
             type,
             imageUrl,
             location,
-            replyTo
+            replyTo,
+            status: 'sent'
         });
 
         await message.save();
@@ -110,6 +111,14 @@ exports.sendMessage = async (req, res) => {
             lastMessageSender: senderId,
             $inc: { [`unreadCount.${receiverId}`]: 1 }
         });
+
+        // Socket.IO Broadcast (Fixes Real-time Issue)
+        const io = req.app.get('io');
+        if (io) {
+            io.to(`user_${receiverId}`).emit('message_received', message);
+            // Also emit to sender (for other devices or confirmation)
+            io.to(`user_${senderId}`).emit('message_sent', message);
+        }
 
         // Send Push Notification
         const receiver = await User.findById(receiverId);
