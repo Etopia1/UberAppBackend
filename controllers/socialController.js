@@ -1,6 +1,7 @@
 const Post = require('../models/Post');
 const Comment = require('../models/Comment');
 const Follow = require('../models/Follow');
+const Block = require('../models/Block');
 const User = require('../models/User');
 
 // Get personalized feed
@@ -407,5 +408,53 @@ exports.updateProfile = async (req, res) => {
     } catch (error) {
         console.error('Update profile error:', error);
         res.status(500).json({ message: 'Failed to update profile', error: error.message });
+    }
+};
+
+// Block a user
+exports.blockUser = async (req, res) => {
+    try {
+        const { userId } = req.params; // The user to block
+        const currentUserId = req.user._id;
+
+        if (userId === currentUserId.toString()) {
+            return res.status(400).json({ message: 'Cannot block yourself' });
+        }
+
+        // Check if already blocked
+        const existingBlock = await Block.findOne({ blocker: currentUserId, blocked: userId });
+        if (existingBlock) {
+            return res.status(200).json({ message: 'User already blocked' });
+        }
+
+        const block = new Block({
+            blocker: currentUserId,
+            blocked: userId
+        });
+        await block.save();
+
+        // Optional: Unfollow if blocking
+        await Follow.deleteOne({ follower: currentUserId, following: userId });
+        await Follow.deleteOne({ follower: userId, following: currentUserId });
+
+        res.json({ message: 'User blocked successfully' });
+    } catch (error) {
+        console.error('Block user error:', error);
+        res.status(500).json({ message: 'Failed to block user' });
+    }
+};
+
+// Unblock a user
+exports.unblockUser = async (req, res) => {
+    try {
+        const { userId } = req.params; // The user to unblock
+        const currentUserId = req.user._id;
+
+        await Block.deleteOne({ blocker: currentUserId, blocked: userId });
+
+        res.json({ message: 'User unblocked successfully' });
+    } catch (error) {
+        console.error('Unblock user error:', error);
+        res.status(500).json({ message: 'Failed to unblock user' });
     }
 };

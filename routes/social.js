@@ -28,6 +28,8 @@ router.patch('/profile', socialController.updateProfile);
 router.get('/users/:userId/posts', socialController.getUserPosts);
 router.get('/users/:userId', socialController.getUserProfile); // Alias for profile fetch by ID
 router.get('/users', socialController.getAllUsers); // Discover users
+router.post('/users/:userId/block', socialController.blockUser);
+router.post('/users/:userId/unblock', socialController.unblockUser);
 
 
 module.exports = router;
