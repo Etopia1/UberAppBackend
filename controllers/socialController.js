@@ -109,6 +109,34 @@ exports.createPost = async (req, res) => {
         // Update user's post count
         await User.findByIdAndUpdate(userId, { $inc: { postsCount: 1 } });
 
+        // Notify Followers
+        try {
+            const followers = await Follow.find({ following: userId }).select('follower');
+            const followerIds = followers.map(f => f.follower);
+
+            if (followerIds.length > 0) {
+                const usersToNotify = await User.find({
+                    _id: { $in: followerIds },
+                    expoPushToken: { $exists: true, $ne: null }
+                }).select('expoPushToken');
+
+                const pushTokens = usersToNotify.map(u => u.expoPushToken);
+
+                if (pushTokens.length > 0) {
+                    const { sendMulticastNotification } = require('../services/pushNotificationService');
+                    await sendMulticastNotification(
+                        pushTokens,
+                        `New Post from ${req.user.name}`,
+                        content ? content.substring(0, 50) + (content.length > 50 ? '...' : '') : 'Check out this new post!',
+                        { type: 'post', postId: post._id }
+                    );
+                }
+            }
+        } catch (notifyErr) {
+            console.error('Notification error:', notifyErr);
+            // Don't fail the request just because notification failed
+        }
+
         console.log('Post created successfully:', post._id);
         res.json({ post });
     } catch (error) {

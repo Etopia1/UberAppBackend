@@ -111,6 +111,18 @@ exports.sendMessage = async (req, res) => {
             $inc: { [`unreadCount.${receiverId}`]: 1 }
         });
 
+        // Send Push Notification
+        const receiver = await User.findById(receiverId);
+        if (receiver && receiver.expoPushToken) {
+            const { sendPushNotification } = require('../services/pushNotificationService');
+            await sendPushNotification(
+                receiver.expoPushToken,
+                req.user.name,
+                type === 'image' ? 'Sent a photo' : content,
+                { type: 'message', conversationId }
+            );
+        }
+
         res.json({ message });
     } catch (error) {
         console.error('Send message error:', error);

@@ -52,13 +52,30 @@ exports.searchLocations = async (req, res) => {
     }
 };
 
+// Airline Helpers
+const airlineMap = {
+    'TP': { name: 'TAP Air Portugal', logo: 'https://img.icons8.com/color/48/tap-air-portugal.png' },
+    'B6': { name: 'JetBlue', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/35/JetBlue_Airways_Logo.svg/1024px-JetBlue_Airways_Logo.svg.png' },
+    'FI': { name: 'Icelandair', logo: 'https://upload.wikimedia.org/wikipedia/commons/thumb/8/87/Icelandair_logo.svg/2560px-Icelandair_logo.svg.png' },
+    'BA': { name: 'British Airways', logo: 'https://img.icons8.com/color/48/british-airways.png' },
+    'AA': { name: 'American Airlines', logo: 'https://img.icons8.com/color/48/american-airlines.png' },
+    'DL': { name: 'Delta Airlines', logo: 'https://img.icons8.com/color/48/delta-airlines.png' },
+    'EK': { name: 'Emirates', logo: 'https://img.icons8.com/color/48/emirates.png' },
+    'LH': { name: 'Lufthansa', logo: 'https://img.icons8.com/color/48/lufthansa.png' },
+    'AF': { name: 'Air France', logo: 'https://img.icons8.com/color/48/air-france.png' },
+    'UA': { name: 'United Airlines', logo: 'https://img.icons8.com/color/48/united-airlines.png' }
+};
+
+const getAirlineInfo = (code) => {
+    return airlineMap[code] || { name: code, logo: 'https://img.icons8.com/color/48/airplane-take-off.png' };
+};
+
 // Search Flights
 exports.searchFlights = async (req, res) => {
     try {
         console.log('Incoming Flight Search Request:', req.body);
         const { origin, destination, date } = req.body;
 
-        // --- HARDCODED INPUT REMOVED (Restoring User Input) ---
         const fOrigin = origin.trim().toUpperCase();
         const fDest = destination.trim().toUpperCase();
         const fDate = date ? date.trim() : new Date().toISOString().split('T')[0];
@@ -71,15 +88,18 @@ exports.searchFlights = async (req, res) => {
             destinationLocationCode: fDest,
             departureDate: fDate,
             adults: '1',
-            max: 5
+            max: 10 // Increased max results
         });
 
         // Transform Data for Frontend
         const flights = response.data.map((offer) => {
             const segment = offer.itineraries[0].segments[0];
+            const carrierCode = segment.carrierCode;
+            const airlineInfo = getAirlineInfo(carrierCode);
+
             return {
                 id: offer.id,
-                airline: segment.carrierCode,
+                airline: airlineInfo.name,
                 flightNumber: `${segment.carrierCode}${segment.number}`,
                 departure: {
                     time: segment.departure.at.split('T')[1].substring(0, 5),
@@ -91,11 +111,11 @@ exports.searchFlights = async (req, res) => {
                 },
                 price: `${offer.price.currency} ${offer.price.total}`,
                 duration: offer.itineraries[0].duration.replace('PT', '').toLowerCase(),
-                logo: 'https://img.icons8.com/color/48/airplane-take-off.png' // Placeholder
+                logo: airlineInfo.logo,
+                rawOffer: offer // Required for Real Booking
             };
         });
 
-        // If API returns 0 results (common in test environment), trigger fallback
         if (!flights || flights.length === 0) {
             throw new Error('No API results found (triggering fallback)');
         }
@@ -106,65 +126,121 @@ exports.searchFlights = async (req, res) => {
         const errorMessage = error.response ? JSON.stringify(error.response.body) : error.message;
         console.error('Amadeus Search Error:', errorMessage);
 
-        // Fallback Mock Data (Restored for Stability per user "use like mock input")
+        // Fallback Mock Data
         res.status(200).json({
             message: 'Showing sample flights (API constrained or Failed)',
             results: [
-                { id: 'MOCK_1', airline: 'BA', flightNumber: 'BA101', departure: { time: '10:00', airport: 'LON' }, arrival: { time: '14:00', airport: 'NYC' }, price: 'USD 450', duration: '7h', logo: 'https://img.icons8.com/color/48/airplane-take-off.png' }
+                { id: 'MOCK_1', airline: 'British Airways', flightNumber: 'BA101', departure: { time: '10:00', airport: 'LON' }, arrival: { time: '14:00', airport: 'NYC' }, price: 'USD 450.00', duration: '7h', logo: 'https://img.icons8.com/color/48/british-airways.png' },
+                { id: 'MOCK_2', airline: 'Emirates', flightNumber: 'EK202', departure: { time: '14:00', airport: 'DXB' }, arrival: { time: '20:00', airport: 'LHR' }, price: 'USD 1200.00', duration: '8h', logo: 'https://img.icons8.com/color/48/emirates.png' }
             ]
         });
     }
 };
 
-// Book Flight & Auto-Suggest Ride
+// Book Flight (Real Amadeus Booking)
 exports.bookFlight = async (req, res) => {
     try {
-        const { userId, flightId, flightDetails, passengers } = req.body;
+        const { userId, flightDetails, passengers } = req.body;
+        const offer = flightDetails.rawOffer;
 
-        // 1. Save Booking to DB
+        if (!offer) {
+            return res.status(400).json({ message: 'Missing flight offer data for booking' });
+        }
+
+        console.log('Starting Real Amadeus Booking Flow...');
+
+        // 1. Confirm Pricing & Availability
+        const pricingResponse = await amadeus.shopping.flightOffers.pricing.post({
+            data: {
+                type: 'flight-offers-pricing',
+                flightOffers: [offer]
+            }
+        });
+        const pricedOffer = pricingResponse.data.flightOffers[0];
+        console.log('Price Confirmed:', pricedOffer.price.total);
+
+        // 2. Create Flight Utility Order (Book Ticket)
+        // Hardcoded Traveler Data (Required by API if not collected from UI)
+        const travelerDetails = {
+            id: '1',
+            dateOfBirth: '1990-01-01',
+            name: { firstName: 'JOLA', lastName: 'ETOPIA' },
+            gender: 'MALE',
+            contact: {
+                emailAddress: 'jolaetopia81@gmail.com', // Using provided email
+                phones: [{ deviceType: 'MOBILE', countryCallingCode: '1', number: '5555555555' }]
+            },
+            documents: [{
+                documentType: 'PASSPORT',
+                birthPlace: 'New York',
+                issuanceLocation: 'New York',
+                issuanceDate: '2015-04-14',
+                number: '00000000',
+                expiryDate: '2030-04-14',
+                issuanceCountry: 'US',
+                validityCountry: 'US',
+                nationality: 'US',
+                holder: true
+            }]
+        };
+
+        const orderResponse = await amadeus.booking.flightOrders.post(
+            JSON.stringify({
+                data: {
+                    type: 'flight-order',
+                    flightOffers: [pricedOffer],
+                    travelers: [travelerDetails]
+                }
+            })
+        );
+        const orderData = orderResponse.data;
+        console.log('Real Booking Success! PNR:', orderData.id);
+
+        // 3. Save to Database
         const newBooking = new Booking({
             user: userId,
-            flightId,
-            airline: flightDetails?.airline || 'Unknown',
-            flightNumber: flightDetails?.flightNumber || 'FL000',
-            origin: flightDetails?.origin || 'UNK',
-            destination: flightDetails?.destination || 'UNK',
-            price: parseFloat(flightDetails?.price?.split(' ')[1]) || 0,
+            flightId: orderData.id, // Real Amadeus Order ID
+            pnr: orderData.associatedRecords?.[0]?.reference || orderData.id, // PNR
+            airline: flightDetails.airline,
+            flightNumber: flightDetails.flightNumber,
+            origin: flightDetails.departure.airport,
+            destination: flightDetails.arrival.airport,
+            price: parseFloat(pricedOffer.price.total),
+            currency: pricedOffer.price.currency,
             passengers: passengers || 1,
-            status: 'confirmed'
+            status: 'confirmed',
+            rawBookingData: orderData // detailed API response
         });
 
         const savedBooking = await newBooking.save();
 
-        // 2. Smart Logic: Calculate Landing Time & Suggest Ride
-        const arrivalTime = flightDetails?.arrival?.time || 'Unknown';
-        const destination = flightDetails?.destination || 'Destination';
-
-        // 3. Real-Time Notification via Socket.IO
+        // 4. Real-Time Notification
         const io = req.app.get('io');
         if (io) {
-            // Emit to specific user if mapped, or broadcast for MVP demo
-            // In production, map userId -> socketId
             io.emit('notification', {
-                title: 'Flight Booked! ✈️',
-                message: `You land at ${arrivalTime}. We can have a ride waiting for you at ${destination}.`,
+                title: 'Ticket Issued! 🎟️',
+                message: `Booking Confirmed. Ref: ${savedBooking.pnr}. Check your email.`,
                 type: 'ride_suggestion',
                 data: {
                     bookingId: savedBooking._id,
-                    pickup: destination, // Airport code
-                    time: arrivalTime
+                    pickup: flightDetails.arrival.airport,
+                    time: flightDetails.arrival.time
                 }
             });
         }
 
         res.status(201).json({
-            message: 'Flight booked successfully',
+            message: 'Real Flight Booking Confirmed',
             booking: savedBooking,
-            suggestion: `Ride suggestion sent for ${arrivalTime}`
+            pnr: savedBooking.pnr
         });
 
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        console.error('Booking Error:', error.response ? JSON.stringify(error.response.result) : error);
+        res.status(500).json({
+            message: 'Booking Failed',
+            details: error.response?.result?.errors || error.message
+        });
     }
 };
 

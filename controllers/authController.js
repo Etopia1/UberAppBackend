@@ -239,3 +239,15 @@ exports.resetPassword = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+
+exports.updatePushToken = async (req, res) => {
+    try {
+        const { token } = req.body;
+        const userId = req.user._id;
+
+        await User.findByIdAndUpdate(userId, { expoPushToken: token });
+        res.status(200).json({ message: 'Push token updated' });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};

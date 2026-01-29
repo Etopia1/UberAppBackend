@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema({
     isPasswordSet: { type: Boolean, default: false }, // For driver onboarding - tracks if password has been set
     otp: { type: String },
     otpExpires: { type: Date },
+    expoPushToken: { type: String }, // For Push Notifications
 
     // Social Media Fields
     bio: { type: String, maxlength: 200, default: '' },
