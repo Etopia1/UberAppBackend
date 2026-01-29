@@ -135,7 +135,7 @@ exports.forgotPassword = async (req, res) => {
     }
 };
 
-// Verify OTP for password reset (before allowing password change)
+// Verify OTP for password reset and return a temporary token
 exports.verifyResetOTP = async (req, res) => {
     try {
         const { email, otp } = req.body;
@@ -145,13 +145,28 @@ exports.verifyResetOTP = async (req, res) => {
         if (user.otp !== otp) return res.status(400).json({ message: 'Invalid OTP' });
         if (user.otpExpires < Date.now()) return res.status(400).json({ message: 'OTP Expired' });
 
-        res.json({ message: 'OTP verified successfully. You can now reset your password.', verified: true });
+        // Generate a short-lived token specifically for password reset
+        const resetToken = jwt.sign(
+            { _id: user._id, email: user.email, scope: 'reset_password' },
+            process.env.JWT_SECRET,
+            { expiresIn: '15m' }
+        );
+
+        // Clear OTP after successful verification to prevent reuse
+        user.otp = undefined;
+        user.otpExpires = undefined;
+        await user.save();
+
+        res.json({
+            message: 'OTP verified successfully.',
+            verified: true,
+            resetToken // Send this to the frontend
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 };
 
-// Resend OTP (for both signup and forgot password)
 exports.resendOTP = async (req, res) => {
     try {
         const { email, type } = req.body; // type can be 'signup' or 'forgot-password'
@@ -187,26 +202,34 @@ exports.resendOTP = async (req, res) => {
 
 exports.resetPassword = async (req, res) => {
     try {
-        const { email, otp, newPassword, confirmPassword } = req.body;
+        // Accept resetToken instead of OTP
+        const { email, resetToken, newPassword, confirmPassword } = req.body;
 
-        // Validate passwords match
         if (newPassword !== confirmPassword) {
             return res.status(400).json({ message: 'Passwords do not match' });
         }
 
-        // Validate password strength (optional)
         if (newPassword.length < 6) {
             return res.status(400).json({ message: 'Password must be at least 6 characters long' });
         }
 
-        const user = await User.findOne({ email });
+        // Verify the token
+        try {
+            const decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
+            if (decoded.scope !== 'reset_password' || decoded.email !== email) {
+                return res.status(401).json({ message: 'Invalid or expired reset token' });
+            }
+        } catch (error) {
+            return res.status(401).json({ message: 'Invalid or expired reset token' });
+        }
 
+        const user = await User.findOne({ email });
         if (!user) return res.status(400).json({ message: 'User not found' });
-        if (user.otp !== otp) return res.status(400).json({ message: 'Invalid OTP' });
-        if (user.otpExpires < Date.now()) return res.status(400).json({ message: 'OTP Expired' });
 
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(newPassword, salt);
+
+        // Ensure no leftover OTP data
         user.otp = undefined;
         user.otpExpires = undefined;
         await user.save();

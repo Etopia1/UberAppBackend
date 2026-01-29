@@ -76,7 +76,7 @@ exports.getPost = async (req, res) => {
 // Create new post
 exports.createPost = async (req, res) => {
     try {
-        const { content, images, rideDetails, sharedPost } = req.body;
+        const { content, images, videos, background, rideDetails, sharedPost } = req.body;
         const userId = req.user._id;
 
         console.log('Creating post for user:', userId);
@@ -90,6 +90,8 @@ exports.createPost = async (req, res) => {
             author: userId,
             content,
             images: images || [],
+            videos: videos || [],
+            background,
             rideDetails,
             sharedPost
         });

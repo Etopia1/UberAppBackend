@@ -4,7 +4,9 @@ const User = require('../models/User');
 // Request a Ride
 exports.requestRide = async (req, res) => {
     try {
-        const { userId, pickup, dropoff, carType, price } = req.body;
+        const { pickup, dropoff, carType, price } = req.body;
+        // Use authenticated user ID, or fallback to body if testing without auth (unlikely)
+        const userId = req.user ? req.user._id : req.body.userId;
 
         // Create new Ride in DB
         const newRide = new Ride({

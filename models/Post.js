@@ -18,6 +18,12 @@ const postSchema = new mongoose.Schema({
     images: [{
         type: String // URLs to images
     }],
+    videos: [{
+        type: String // URLs to videos
+    }],
+    background: {
+        type: String // Hex color code or gradient name
+    },
     rideDetails: {
         from: String,
         to: String,

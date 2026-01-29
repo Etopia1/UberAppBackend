@@ -7,6 +7,51 @@ const amadeus = new Amadeus({
     clientSecret: process.env.AMADEUS_CLIENT_SECRET
 });
 
+// Search Airport/City Locations (Autocomplete)
+exports.searchLocations = async (req, res) => {
+    try {
+        const { keyword } = req.query;
+        if (!keyword || keyword.length < 2) {
+            return res.json({ results: [] });
+        }
+
+        console.log(`Searching Amadeus for location: ${keyword}`);
+
+        try {
+            const response = await amadeus.referenceData.locations.get({
+                keyword: keyword,
+                subType: Amadeus.location.any
+            });
+
+            const locations = response.data.map(loc => ({
+                name: loc.name,
+                detailedName: `${loc.address.cityName}, ${loc.address.countryName} (${loc.iataCode})`,
+                iataCode: loc.iataCode,
+                type: loc.subType
+            }));
+
+            res.json({ results: locations });
+
+        } catch (apiError) {
+            console.warn('Amadeus Location Search Failed (using mock fallback):', apiError.response ? apiError.response.body : apiError.message);
+            // Fallback Mock Data for testing without API keys
+            const mockLocations = [
+                { name: 'John F. Kennedy Intl', detailedName: 'New York, USA (JFK)', iataCode: 'JFK' },
+                { name: 'Heathrow', detailedName: 'London, UK (LHR)', iataCode: 'LHR' },
+                { name: 'Los Angeles Intl', detailedName: 'Los Angeles, USA (LAX)', iataCode: 'LAX' },
+                { name: 'Dubai Intl', detailedName: 'Dubai, UAE (DXB)', iataCode: 'DXB' },
+                { name: 'Paris Charles de Gaulle', detailedName: 'Paris, France (CDG)', iataCode: 'CDG' }
+            ].filter(l => l.detailedName.toLowerCase().includes(keyword.toLowerCase()));
+
+            res.json({ results: mockLocations });
+        }
+
+    } catch (error) {
+        console.error('Location Search Error:', error);
+        res.status(500).json({ message: 'Location search failed' });
+    }
+};
+
 // Search Flights
 exports.searchFlights = async (req, res) => {
     try {
@@ -129,9 +174,14 @@ exports.simulateFlightLanding = async (req, res) => {
         const { bookingId } = req.params;
 
         // 1. Find Booking
-        const booking = await Booking.findById(bookingId);
+        const booking = await Booking.findById(bookingId).populate('user');
         if (!booking) {
             return res.status(404).json({ message: 'Booking not found' });
+        }
+
+        if (!booking.user) {
+            console.error('Ride Creation Failed: Booking has no associated user');
+            return res.status(400).json({ message: 'Booking has no invalid user, cannot auto-book ride.' });
         }
 
         // 2. Update Status to 'landed'
@@ -143,31 +193,53 @@ exports.simulateFlightLanding = async (req, res) => {
         // 3. Trigger Auto-Ride if enabled
         if (booking.autoBookRide) {
             const Ride = require('../models/Ride');
+            console.log('Attempting to auto-book ride for Booking:', booking._id);
+            console.log('Booking User Field:', booking.user);
 
-            // Create a new ride from the airport
-            const newRide = new Ride({
-                user: booking.user,
-                pickup: {
-                    address: `${booking.destination} Airport`,
-                    latitude: booking.destinationCoords?.latitude || 40.7128, // NYC Placeholder
-                    longitude: booking.destinationCoords?.longitude || -74.0060
-                },
-                dropoff: {
-                    address: 'Saved Home', // In a real app, this would be user's home address
-                    latitude: 40.7306,
-                    longitude: -73.9352
-                },
-                fare: 45.0, // Standard airport flat rate
-                status: 'searching'
-            });
+            const pickupLat = booking.destinationCoords?.latitude || 40.7128;
+            const pickupLng = booking.destinationCoords?.longitude || -74.0060;
 
-            autoRide = await newRide.save();
+            // Resolve User ID safely
+            let rideUserId = null;
+            if (booking.user && booking.user._id) {
+                rideUserId = booking.user._id;
+            } else if (booking.user) {
+                rideUserId = booking.user;
+            }
+
+            console.log('Resolved Ride User ID:', rideUserId);
+
+            if (!rideUserId) {
+                console.error('CRITICAL: Cannot book ride, user ID is null.');
+                // Don't crash, just skip ride booking
+            } else {
+                // Create a new ride from the airport
+                const newRide = new Ride({
+                    user: rideUserId,
+                    pickup: {
+                        address: `${booking.destination || 'Airport'}`,
+                        latitude: pickupLat,
+                        longitude: pickupLng
+                    },
+                    dropoff: {
+                        address: 'Saved Home', // In a real app, this would be user's home address
+                        latitude: 40.7306,
+                        longitude: -73.9352
+                    },
+                    fare: 45.0, // Standard airport flat rate
+                    status: 'searching'
+                });
+
+                autoRide = await newRide.save();
+                console.log('Ride auto-booked successfully:', autoRide._id);
+            }
         }
 
         // 4. Notify User via Socket
         const io = req.app.get('io');
         if (io) {
-            io.to(`user_${booking.user}`).emit('flight_landed', {
+            const userIdStr = booking.user._id ? booking.user._id.toString() : booking.user.toString();
+            io.to(`user_${userIdStr}`).emit('flight_landed', {
                 message: '🛬 Your flight has landed!',
                 bookingId: booking._id,
                 autoRide: autoRide
