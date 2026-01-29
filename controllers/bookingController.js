@@ -1,5 +1,35 @@
 const Booking = require('../models/Booking');
 
+exports.createBooking = async (req, res) => {
+    try {
+        const { userId, type, details, amount, status } = req.body;
+
+        const newBooking = new Booking({
+            user: userId,
+            type: type || 'flight',
+            flightId: details.flightNumber || 'FL-' + Date.now(), // Map to flightId (required)
+            airline: details.airline,
+            flightNumber: details.flightNumber || 'FL-' + Date.now().toString().slice(-4),
+            departureTime: details.date, // Map to departureTime
+            origin: details.origin,
+            destination: details.destination,
+            totalPrice: amount, // Map to totalPrice
+            status: status || 'confirmed',
+            details: details
+        });
+
+        await newBooking.save();
+
+        res.status(201).json({
+            message: 'Booking created successfully',
+            booking: newBooking
+        });
+    } catch (error) {
+        console.error('Create booking error:', error);
+        res.status(500).json({ message: 'Failed to create booking' });
+    }
+};
+
 // Get all bookings for the authenticated user
 exports.getUserBookings = async (req, res) => {
     try {

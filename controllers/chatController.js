@@ -270,11 +270,6 @@ exports.reactToMessage = async (req, res) => {
         }
 
         // Toggle reaction: if already reacted with this emoji, remove it. Else add it.
-        // For simplicity, we might just allow adding multiple or strictly one per user.
-        // Let's implement toggle logic for the SAME emoji, or just push if different? 
-        // Best UX: User can have only 1 reaction? Or multiple? Standard is usually 1 reaction per user OR multiple.
-        // Let's go with: Toggle the specific emoji.
-
         const existingReactionIndex = message.reactions.findIndex(
             r => r.user.toString() === userId.toString() && r.emoji === emoji
         );
@@ -310,5 +305,65 @@ exports.reactToMessage = async (req, res) => {
     } catch (error) {
         console.error('React message error:', error);
         res.status(500).json({ message: 'Failed to react to message' });
+    }
+};
+
+// Delete a conversation
+exports.deleteConversation = async (req, res) => {
+    try {
+        const { conversationId } = req.params;
+        const userId = req.user._id;
+
+        // Verify participation
+        const conversation = await Conversation.findOne({
+            _id: conversationId,
+            participants: userId
+        });
+
+        if (!conversation) {
+            return res.status(404).json({ message: 'Conversation not found or not authorized' });
+        }
+
+        // Delete all messages in conversation
+        await Message.deleteMany({ conversation: conversationId });
+
+        // Delete conversation
+        await Conversation.deleteOne({ _id: conversationId });
+
+        res.json({ message: 'Conversation deleted successfully' });
+    } catch (error) {
+        console.error('Delete conversation error:', error);
+        res.status(500).json({ message: 'Failed to delete conversation' });
+    }
+};
+
+// Clear all messages in a conversation
+exports.clearChat = async (req, res) => {
+    try {
+        const { conversationId } = req.params;
+        const userId = req.user._id;
+
+        // Verify participation
+        const conversation = await Conversation.findOne({
+            _id: conversationId,
+            participants: userId
+        });
+
+        if (!conversation) {
+            return res.status(404).json({ message: 'Conversation not found or not authorized' });
+        }
+
+        // Delete all messages
+        await Message.deleteMany({ conversation: conversationId });
+
+        // Update conversation last message
+        conversation.lastMessage = '';
+        conversation.lastMessageTime = conversation.createdAt; // Reset to creation time? or keep?
+        await conversation.save();
+
+        res.json({ message: 'Chat cleared successfully' });
+    } catch (error) {
+        console.error('Clear chat error:', error);
+        res.status(500).json({ message: 'Failed to clear chat' });
     }
 };

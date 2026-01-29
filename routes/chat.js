@@ -7,11 +7,14 @@ const { authenticate } = require('../middleware/auth');
 router.use(authenticate);
 
 // Conversation routes
+// Conversation routes
 router.get('/conversations', chatController.getConversations);
 router.post('/conversations', chatController.createConversation);
 router.get('/conversations/:conversationId/messages', chatController.getMessages);
 router.get('/conversations/:conversationId/media', chatController.getConversationMedia);
 router.patch('/conversations/:conversationId/read', chatController.markAsRead);
+router.delete('/conversations/:conversationId', chatController.deleteConversation);
+router.delete('/conversations/:conversationId/messages', chatController.clearChat);
 
 // Alternative routes (for compatibility)
 router.get('/:conversationId/messages', chatController.getMessages);
