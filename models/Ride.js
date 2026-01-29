@@ -33,6 +33,14 @@ const RideSchema = new mongoose.Schema({
         type: String, // 'UberX', 'Black', etc.
         default: 'UberX'
     },
+    scheduledTime: {
+        type: String
+    },
+    paymentMethod: {
+        type: String,
+        enum: ['cash', 'wallet'],
+        default: 'cash'
+    },
     otp: {
         type: String // For ride start verification
     }

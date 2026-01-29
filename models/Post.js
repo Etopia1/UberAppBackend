@@ -24,6 +24,12 @@ const postSchema = new mongoose.Schema({
     background: {
         type: String // Hex color code or gradient name
     },
+    tags: [{
+        type: String
+    }],
+    feeling: {
+        type: String
+    },
     rideDetails: {
         from: String,
         to: String,

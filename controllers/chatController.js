@@ -1,6 +1,7 @@
 const Conversation = require('../models/Conversation');
 const Message = require('../models/Message');
 const Follow = require('../models/Follow');
+const User = require('../models/User');
 
 // Check if two users are friends (mutual follow)
 const areFriends = async (user1, user2) => {
@@ -121,15 +122,21 @@ exports.sendMessage = async (req, res) => {
         }
 
         // Send Push Notification
-        const receiver = await User.findById(receiverId);
-        if (receiver && receiver.expoPushToken) {
-            const { sendPushNotification } = require('../services/pushNotificationService');
-            await sendPushNotification(
-                receiver.expoPushToken,
-                req.user.name,
-                type === 'image' ? 'Sent a photo' : content,
-                { type: 'message', conversationId }
-            );
+        try {
+            const receiver = await User.findById(receiverId);
+            if (receiver && receiver.expoPushToken) {
+                const { sendPushNotification } = require('../services/pushNotificationService');
+                const senderName = req.user.name || 'someone'; // Fallback if name not in token
+                await sendPushNotification(
+                    receiver.expoPushToken,
+                    senderName,
+                    type === 'image' ? 'Sent a photo' : content,
+                    { type: 'message', conversationId }
+                );
+            }
+        } catch (pushError) {
+            console.error('Push notification error (non-fatal):', pushError);
+            // Don't fail the message send if push fails
         }
 
         res.json({ message });

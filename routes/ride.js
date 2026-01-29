@@ -5,6 +5,6 @@ const authenticate = require('../middleware/auth');
 router.use(authenticate);
 
 router.post('/request', rideController.requestRide);
-router.get('/:rideId/status', rideController.getRideStatus);
+router.get('/status/:rideId', rideController.getRideStatus);
 
 module.exports = router;
