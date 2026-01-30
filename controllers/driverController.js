@@ -2,7 +2,7 @@ const User = require('../models/User');
 const bcrypt = require('bcryptjs');
 const { sendOTP } = require('../services/emailService');
 const otpGenerator = require('otp-generator');
-const { signUpTemplate, forgotPasswordTemplate } = require('../helpers/emailTemplate');
+const { signUpTemplate, forgotPasswordTemplate, driverWelcomeTemplate } = require('../helpers/emailTemplate');
 
 // Helper to generate OTP
 const generateOTP = () => otpGenerator.generate(4, {
@@ -46,19 +46,8 @@ exports.createDriver = async (req, res) => {
         const savedDriver = await newDriver.save();
 
         // Send welcome email with OTP
-        const emailContent = `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                <h2 style="color: #10b981;">Welcome to Driven, ${name}!</h2>
-                <p>Your driver account has been created. Please use the following OTP to set your password:</p>
-                <div style="background-color: #f3f4f6; padding: 20px; text-align: center; font-size: 32px; font-weight: bold; letter-spacing: 5px; margin: 20px 0;">
-                    ${otp}
-                </div>
-                <p>This OTP will expire in 10 minutes.</p>
-                <p><strong>Your Login Email:</strong> ${email}</p>
-                <p>After setting your password, you can login to the Driven app.</p>
-                <p>Best regards,<br/>The Driven Team</p>
-            </div>
-        `;
+        // Send welcome email with OTP
+        const emailContent = driverWelcomeTemplate(otp, name, email);
 
         await sendOTP(email, otp, emailContent, 'Welcome to Driven - Set Your Password');
 
