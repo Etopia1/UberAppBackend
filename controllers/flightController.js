@@ -1,5 +1,7 @@
 const Booking = require('../models/Booking');
 const Amadeus = require('amadeus');
+const { sendOTP } = require('../services/emailService'); // Re-using existing service
+const { otpTemplate } = require('../helpers/emailTemplate');
 
 // Initialize Amadeus (Use environment variables)
 const amadeus = new Amadeus({
@@ -17,34 +19,19 @@ exports.searchLocations = async (req, res) => {
 
         console.log(`Searching Amadeus for location: ${keyword}`);
 
-        try {
-            const response = await amadeus.referenceData.locations.get({
-                keyword: keyword,
-                subType: Amadeus.location.any
-            });
+        const response = await amadeus.referenceData.locations.get({
+            keyword: keyword,
+            subType: Amadeus.location.any
+        });
 
-            const locations = response.data.map(loc => ({
-                name: loc.name,
-                detailedName: `${loc.address.cityName}, ${loc.address.countryName} (${loc.iataCode})`,
-                iataCode: loc.iataCode,
-                type: loc.subType
-            }));
+        const locations = response.data.map(loc => ({
+            name: loc.name,
+            detailedName: `${loc.address.cityName}, ${loc.address.countryName} (${loc.iataCode})`,
+            iataCode: loc.iataCode,
+            type: loc.subType
+        }));
 
-            res.json({ results: locations });
-
-        } catch (apiError) {
-            console.warn('Amadeus Location Search Failed (using mock fallback):', apiError.response ? apiError.response.body : apiError.message);
-            // Fallback Mock Data for testing without API keys
-            const mockLocations = [
-                { name: 'John F. Kennedy Intl', detailedName: 'New York, USA (JFK)', iataCode: 'JFK' },
-                { name: 'Heathrow', detailedName: 'London, UK (LHR)', iataCode: 'LHR' },
-                { name: 'Los Angeles Intl', detailedName: 'Los Angeles, USA (LAX)', iataCode: 'LAX' },
-                { name: 'Dubai Intl', detailedName: 'Dubai, UAE (DXB)', iataCode: 'DXB' },
-                { name: 'Paris Charles de Gaulle', detailedName: 'Paris, France (CDG)', iataCode: 'CDG' }
-            ].filter(l => l.detailedName.toLowerCase().includes(keyword.toLowerCase()));
-
-            res.json({ results: mockLocations });
-        }
+        res.json({ results: locations });
 
     } catch (error) {
         console.error('Location Search Error:', error);
@@ -88,7 +75,7 @@ exports.searchFlights = async (req, res) => {
             destinationLocationCode: fDest,
             departureDate: fDate,
             adults: '1',
-            max: 10 // Increased max results
+            max: 20
         });
 
         // Transform Data for Frontend
@@ -117,7 +104,7 @@ exports.searchFlights = async (req, res) => {
         });
 
         if (!flights || flights.length === 0) {
-            throw new Error('No API results found (triggering fallback)');
+            return res.status(404).json({ message: 'No flights found for this route.' });
         }
 
         res.json({ message: 'Flights found', results: flights });
@@ -125,15 +112,7 @@ exports.searchFlights = async (req, res) => {
     } catch (error) {
         const errorMessage = error.response ? JSON.stringify(error.response.body) : error.message;
         console.error('Amadeus Search Error:', errorMessage);
-
-        // Fallback Mock Data
-        res.status(200).json({
-            message: 'Showing sample flights (API constrained or Failed)',
-            results: [
-                { id: 'MOCK_1', airline: 'British Airways', flightNumber: 'BA101', departure: { time: '10:00', airport: 'LON' }, arrival: { time: '14:00', airport: 'NYC' }, price: 'USD 450.00', duration: '7h', logo: 'https://img.icons8.com/color/48/british-airways.png' },
-                { id: 'MOCK_2', airline: 'Emirates', flightNumber: 'EK202', departure: { time: '14:00', airport: 'DXB' }, arrival: { time: '20:00', airport: 'LHR' }, price: 'USD 1200.00', duration: '8h', logo: 'https://img.icons8.com/color/48/emirates.png' }
-            ]
-        });
+        res.status(500).json({ message: 'Flight search failed. Please check inputs or try again later.' });
     }
 };
 
@@ -150,24 +129,37 @@ exports.bookFlight = async (req, res) => {
         console.log('Starting Real Amadeus Booking Flow...');
 
         // 1. Confirm Pricing & Availability
-        const pricingResponse = await amadeus.shopping.flightOffers.pricing.post({
-            data: {
-                type: 'flight-offers-pricing',
-                flightOffers: [offer]
+        let pricedOffer;
+        try {
+            const pricingResponse = await amadeus.shopping.flightOffers.pricing.post({
+                data: {
+                    type: 'flight-offers-pricing',
+                    flightOffers: [offer]
+                }
+            });
+            pricedOffer = pricingResponse.data.flightOffers[0];
+            console.log('Price Confirmed:', pricedOffer.price.total);
+        } catch (priceError) {
+            console.error('Pricing Error:', priceError.response ? JSON.stringify(priceError.response.result) : priceError.message);
+
+            // Handle Price Discrepancy specifically
+            if (priceError.response?.result?.errors?.some(e => e.code === 37200 || e.title === 'PRICE DISCREPANCY')) {
+                return res.status(409).json({
+                    message: 'Flight price has changed. Please search again.',
+                    code: 'PRICE_DISCREPANCY'
+                });
             }
-        });
-        const pricedOffer = pricingResponse.data.flightOffers[0];
-        console.log('Price Confirmed:', pricedOffer.price.total);
+            throw priceError;
+        }
 
         // 2. Create Flight Utility Order (Book Ticket)
-        // Hardcoded Traveler Data (Required by API if not collected from UI)
         const travelerDetails = {
             id: '1',
             dateOfBirth: '1990-01-01',
             name: { firstName: 'JOLA', lastName: 'ETOPIA' },
             gender: 'MALE',
             contact: {
-                emailAddress: 'jolaetopia81@gmail.com', // Using provided email
+                emailAddress: 'jolaetopia81@gmail.com',
                 phones: [{ deviceType: 'MOBILE', countryCallingCode: '1', number: '5555555555' }]
             },
             documents: [{
@@ -194,13 +186,14 @@ exports.bookFlight = async (req, res) => {
             })
         );
         const orderData = orderResponse.data;
-        console.log('Real Booking Success! PNR:', orderData.id);
+        const pnr = orderData.associatedRecords?.[0]?.reference || orderData.id;
+        console.log('Real Booking Success! PNR:', pnr);
 
         // 3. Save to Database
         const newBooking = new Booking({
             user: userId,
-            flightId: orderData.id, // Real Amadeus Order ID
-            pnr: orderData.associatedRecords?.[0]?.reference || orderData.id, // PNR
+            flightId: orderData.id,
+            pnr: pnr,
             airline: flightDetails.airline,
             flightNumber: flightDetails.flightNumber,
             origin: flightDetails.departure.airport,
@@ -209,12 +202,27 @@ exports.bookFlight = async (req, res) => {
             currency: pricedOffer.price.currency,
             passengers: passengers || 1,
             status: 'confirmed',
-            rawBookingData: orderData // detailed API response
+            rawBookingData: orderData
         });
 
         const savedBooking = await newBooking.save();
 
-        // 4. Real-Time Notification
+        // 4. Send Confirmation Email
+        const userEmail = req.body.email || 'jolaetopia81@gmail.com';
+
+        const emailContent = `
+            <h2>Booking Confirmed! ✈️</h2>
+            <p>Your flight to <strong>${flightDetails.arrival.airport}</strong> is confirmed.</p>
+            <p><strong>PNR:</strong> ${pnr}</p>
+            <p><strong>Airline:</strong> ${flightDetails.airline}</p>
+            <p><strong>Flight:</strong> ${flightDetails.flightNumber}</p>
+            <p><strong>Departure:</strong> ${flightDetails.departure.time}</p>
+            <p>Safe travels!</p>
+        `;
+
+        await sendOTP(userEmail, pnr, emailContent, 'Flight Confirmation - Driven App');
+
+        // 5. Real-Time Notification
         const io = req.app.get('io');
         if (io) {
             io.emit('notification', {
@@ -224,7 +232,8 @@ exports.bookFlight = async (req, res) => {
                 data: {
                     bookingId: savedBooking._id,
                     pickup: flightDetails.arrival.airport,
-                    time: flightDetails.arrival.time
+                    time: flightDetails.arrival.time,
+                    destinationCoords: flightDetails.arrival.coords
                 }
             });
         }
@@ -237,6 +246,14 @@ exports.bookFlight = async (req, res) => {
 
     } catch (error) {
         console.error('Booking Error:', error.response ? JSON.stringify(error.response.result) : error);
+
+        if (error.response?.result?.errors?.some(e => e.code === 37200 || e.title === 'PRICE DISCREPANCY')) {
+            return res.status(409).json({
+                message: 'Flight price has changed. Please search again.',
+                code: 'PRICE_DISCREPANCY'
+            });
+        }
+
         res.status(500).json({
             message: 'Booking Failed',
             details: error.response?.result?.errors || error.message
@@ -270,26 +287,15 @@ exports.simulateFlightLanding = async (req, res) => {
         if (booking.autoBookRide) {
             const Ride = require('../models/Ride');
             console.log('Attempting to auto-book ride for Booking:', booking._id);
-            console.log('Booking User Field:', booking.user);
 
             const pickupLat = booking.destinationCoords?.latitude || 40.7128;
             const pickupLng = booking.destinationCoords?.longitude || -74.0060;
 
-            // Resolve User ID safely
-            let rideUserId = null;
-            if (booking.user && booking.user._id) {
-                rideUserId = booking.user._id;
-            } else if (booking.user) {
-                rideUserId = booking.user;
-            }
-
-            console.log('Resolved Ride User ID:', rideUserId);
+            const rideUserId = booking.user._id || booking.user;
 
             if (!rideUserId) {
                 console.error('CRITICAL: Cannot book ride, user ID is null.');
-                // Don't crash, just skip ride booking
             } else {
-                // Create a new ride from the airport
                 const newRide = new Ride({
                     user: rideUserId,
                     pickup: {
@@ -298,7 +304,7 @@ exports.simulateFlightLanding = async (req, res) => {
                         longitude: pickupLng
                     },
                     dropoff: {
-                        address: 'Saved Home', // In a real app, this would be user's home address
+                        address: 'Saved Home',
                         latitude: 40.7306,
                         longitude: -73.9352
                     },
