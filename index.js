@@ -91,10 +91,30 @@ io.on('connection', (socket) => {
             const User = require('./models/User');
             await User.findByIdAndUpdate(userId, { isOnline: true });
 
-            // Broadcast online status to everyone (or specific contacts if optimized)
+            // Broadcast online status
             io.emit('user_status_update', { userId, isOnline: true });
+
+            // DELIVERED STATUS LOGIC
+            const Message = require('./models/Message');
+            const pendingMessages = await Message.find({ receiver: userId, status: 'sent' });
+
+            if (pendingMessages.length > 0) {
+                await Message.updateMany(
+                    { receiver: userId, status: 'sent' },
+                    { status: 'delivered', deliveredAt: new Date() }
+                );
+
+                // Notify Senders
+                pendingMessages.forEach(msg => {
+                    io.to(`user_${msg.sender}`).emit('message_status_update', {
+                        messageId: msg._id,
+                        status: 'delivered',
+                        conversationId: msg.conversation
+                    });
+                });
+            }
         } catch (error) {
-            console.error('Error updating online status:', error);
+            console.error('Error updating online/delivery status:', error);
         }
     });
 

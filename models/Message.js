@@ -89,7 +89,15 @@ const messageSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Message'
     },
-    // Read status
+    // Read status and delivery status
+    status: {
+        type: String,
+        enum: ['sent', 'delivered', 'read'],
+        default: 'sent'
+    },
+    deliveredAt: {
+        type: Date
+    },
     read: {
         type: Boolean,
         default: false

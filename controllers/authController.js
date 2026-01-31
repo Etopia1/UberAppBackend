@@ -6,6 +6,7 @@ const otpGenerator = require('otp-generator');
 const { signUpTemplate, forgotPasswordTemplate } = require('../helpers/emailTemplate');
 const { OAuth2Client } = require('google-auth-library');
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+// Native fetch is available in Node 18+. If older, we'd need node-fetch, but let's assume 18+.
 
 // Helper to generate OTP
 const generateOTP = () => otpGenerator.generate(4, {
@@ -83,11 +84,47 @@ exports.login = async (req, res) => {
 exports.googleLogin = async (req, res) => {
     try {
         const { token } = req.body;
-        const ticket = await client.verifyIdToken({
-            idToken: token,
-            audience: process.env.GOOGLE_CLIENT_ID,
-        });
-        const { name, email, picture } = ticket.getPayload();
+        let googleUser = {};
+
+        // 1. Try modifying as ID Token (Standard for Mobile)
+        try {
+            const ticket = await client.verifyIdToken({
+                idToken: token,
+                audience: process.env.GOOGLE_CLIENT_ID,
+            });
+            const payload = ticket.getPayload();
+            googleUser = {
+                email: payload.email,
+                name: payload.name,
+                picture: payload.picture
+            };
+        } catch (idTokenError) {
+            console.log('ID Token verification failed, trying Access Token...', idTokenError.message);
+
+            // 2. Try verifying as Access Token (Standard for Web/Expo Go)
+            try {
+                const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch user info with access token');
+                }
+
+                const payload = await response.json();
+                googleUser = {
+                    email: payload.email,
+                    name: payload.name,
+                    picture: payload.picture
+                };
+            } catch (accessTokenError) {
+                console.error('Access Token verification failed:', accessTokenError.message);
+                return res.status(401).json({ message: 'Invalid Google Token' });
+            }
+        }
+
+        const { name, email, picture } = googleUser;
+        console.log('Google Auth Success for:', email);
 
         let user = await User.findOne({ email });
 
@@ -111,6 +148,7 @@ exports.googleLogin = async (req, res) => {
         res.json({ token: jwtToken, user: { id: user._id, name: user.name, role: user.role, avatar: user.avatar } });
 
     } catch (err) {
+        console.error('Google Login Helper Error:', err);
         res.status(500).json({ error: err.message });
     }
 };

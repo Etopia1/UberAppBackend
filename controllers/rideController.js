@@ -4,18 +4,27 @@ const User = require('../models/User');
 // Request a Ride
 exports.requestRide = async (req, res) => {
     try {
-        const { pickup, dropoff, carType, price } = req.body;
-        // Use authenticated user ID, or fallback to body if testing without auth (unlikely)
+        const { pickup, dropoff, pickupCoords, dropoffCoords, carType, price, scheduledTime, paymentMethod } = req.body;
         const userId = req.user ? req.user._id : req.body.userId;
 
         // Create new Ride in DB
         const newRide = new Ride({
             user: userId,
-            pickup: { address: pickup?.address || 'Current Location', latitude: pickup?.lat, longitude: pickup?.lng },
-            dropoff: { address: dropoff?.address || 'Destination', latitude: dropoff?.lat, longitude: dropoff?.lng },
+            pickup: {
+                address: pickup || 'Current Location',
+                latitude: pickupCoords ? pickupCoords[1] : null,
+                longitude: pickupCoords ? pickupCoords[0] : null
+            },
+            dropoff: {
+                address: dropoff || 'Destination',
+                latitude: dropoffCoords ? dropoffCoords[1] : null,
+                longitude: dropoffCoords ? dropoffCoords[0] : null
+            },
             carType,
             fare: price || 0,
-            status: 'searching'
+            status: 'searching',
+            scheduledTime,
+            paymentMethod
         });
 
         const savedRide = await newRide.save();
@@ -25,6 +34,7 @@ exports.requestRide = async (req, res) => {
             ride: savedRide
         });
     } catch (error) {
+        console.error('Request ride error:', error);
         res.status(500).json({ message: error.message });
     }
 };

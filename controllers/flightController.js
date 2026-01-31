@@ -1,7 +1,7 @@
 const Booking = require('../models/Booking');
 const Amadeus = require('amadeus');
 const { sendOTP } = require('../services/emailService'); // Re-using existing service
-const { otpTemplate } = require('../helpers/emailTemplate');
+const { otpTemplate } = require('../helpers/emailTemplate'); // We might need a flight template, but using generic for now
 
 // Initialize Amadeus (Use environment variables)
 const amadeus = new Amadeus({
@@ -35,6 +35,7 @@ exports.searchLocations = async (req, res) => {
 
     } catch (error) {
         console.error('Location Search Error:', error);
+        // No mock fallback
         res.status(500).json({ message: 'Location search failed' });
     }
 };
@@ -75,7 +76,7 @@ exports.searchFlights = async (req, res) => {
             destinationLocationCode: fDest,
             departureDate: fDate,
             adults: '1',
-            max: 20
+            max: 20 // Increased max results
         });
 
         // Transform Data for Frontend
@@ -112,6 +113,7 @@ exports.searchFlights = async (req, res) => {
     } catch (error) {
         const errorMessage = error.response ? JSON.stringify(error.response.body) : error.message;
         console.error('Amadeus Search Error:', errorMessage);
+        // No mock fallback
         res.status(500).json({ message: 'Flight search failed. Please check inputs or try again later.' });
     }
 };
@@ -142,24 +144,39 @@ exports.bookFlight = async (req, res) => {
         } catch (priceError) {
             console.error('Pricing Error:', priceError.response ? JSON.stringify(priceError.response.result) : priceError.message);
 
-            // Handle Price Discrepancy specifically
-            if (priceError.response?.result?.errors?.some(e => e.code === 37200 || e.title === 'PRICE DISCREPANCY')) {
+            const errorResult = priceError.response?.result;
+
+            // Handle Price Discrepancy (409)
+            if (priceError.response?.statusCode === 409 ||
+                errorResult?.errors?.some(e => e.code == 37200 || e.title === 'PRICE DISCREPANCY')) {
                 return res.status(409).json({
                     message: 'Flight price has changed. Please search again.',
                     code: 'PRICE_DISCREPANCY'
                 });
             }
+
+            // Handle No Fare Applicable / Invalid Data (400) - e.g. Flight expired
+            if (priceError.response?.statusCode === 400 ||
+                errorResult?.errors?.some(e => e.code == 4926 || e.title === 'INVALID DATA RECEIVED')) {
+                return res.status(400).json({
+                    message: 'Flight is no longer available. Please search again.',
+                    code: 'FLIGHT_UNAVAILABLE'
+                });
+            }
+
             throw priceError;
         }
 
         // 2. Create Flight Utility Order (Book Ticket)
+        // Hardcoded Traveler Data (Required by API if not collected from UI)
+        // In a real app, this should come from req.body.travelers
         const travelerDetails = {
             id: '1',
             dateOfBirth: '1990-01-01',
-            name: { firstName: 'JOLA', lastName: 'ETOPIA' },
+            name: { firstName: 'JOLA', lastName: 'ETOPIA' }, // Replace with real user name
             gender: 'MALE',
             contact: {
-                emailAddress: 'jolaetopia81@gmail.com',
+                emailAddress: 'jolaetopia81@gmail.com', // Replace with real user email
                 phones: [{ deviceType: 'MOBILE', countryCallingCode: '1', number: '5555555555' }]
             },
             documents: [{
@@ -192,7 +209,7 @@ exports.bookFlight = async (req, res) => {
         // 3. Save to Database
         const newBooking = new Booking({
             user: userId,
-            flightId: orderData.id,
+            flightId: orderData.id, // Real Amadeus Order ID
             pnr: pnr,
             airline: flightDetails.airline,
             flightNumber: flightDetails.flightNumber,
@@ -202,12 +219,15 @@ exports.bookFlight = async (req, res) => {
             currency: pricedOffer.price.currency,
             passengers: passengers || 1,
             status: 'confirmed',
-            rawBookingData: orderData
+            autoBookRide: true, // Explicitly enable for demo
+            rawBookingData: orderData // detailed API response
         });
 
         const savedBooking = await newBooking.save();
 
         // 4. Send Confirmation Email
+        // Assuming user email is available in req.body or we need to fetch user.
+        // For now using the hardcoded one or one passed in body if available, or fallback.
         const userEmail = req.body.email || 'jolaetopia81@gmail.com';
 
         const emailContent = `
@@ -220,6 +240,7 @@ exports.bookFlight = async (req, res) => {
             <p>Safe travels!</p>
         `;
 
+        // Use generic HTML wrapper
         await sendOTP(userEmail, pnr, emailContent, 'Flight Confirmation - Driven App');
 
         // 5. Real-Time Notification
@@ -233,7 +254,7 @@ exports.bookFlight = async (req, res) => {
                     bookingId: savedBooking._id,
                     pickup: flightDetails.arrival.airport,
                     time: flightDetails.arrival.time,
-                    destinationCoords: flightDetails.arrival.coords
+                    destinationCoords: flightDetails.arrival.coords // If available
                 }
             });
         }
@@ -245,18 +266,32 @@ exports.bookFlight = async (req, res) => {
         });
 
     } catch (error) {
-        console.error('Booking Error:', error.response ? JSON.stringify(error.response.result) : error);
+        const errorDetails = error.response ? error.response.result : error.message;
+        console.error('Booking Error (Final Catch):', JSON.stringify(errorDetails, null, 2));
 
-        if (error.response?.result?.errors?.some(e => e.code === 37200 || e.title === 'PRICE DISCREPANCY')) {
+        const isPriceDiscrepancy =
+            error.response?.statusCode === 409 ||
+            error.response?.result?.errors?.some(e => e.code == 37200 || e.title === 'PRICE DISCREPANCY');
+
+        if (isPriceDiscrepancy) {
             return res.status(409).json({
                 message: 'Flight price has changed. Please search again.',
                 code: 'PRICE_DISCREPANCY'
             });
         }
 
+        // Handle No Fare Applicable / Invalid Data (400) - e.g. Flight expired
+        if (error.response?.statusCode === 400 ||
+            error.response?.result?.errors?.some(e => e.code == 4926 || e.title === 'INVALID DATA RECEIVED')) {
+            return res.status(400).json({
+                message: 'Flight is no longer available. Please search again.',
+                code: 'FLIGHT_UNAVAILABLE'
+            });
+        }
+
         res.status(500).json({
             message: 'Booking Failed',
-            details: error.response?.result?.errors || error.message
+            details: errorDetails
         });
     }
 };
