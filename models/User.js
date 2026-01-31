@@ -5,7 +5,7 @@ const userSchema = new mongoose.Schema({
     email: { type: String, required: true, unique: true },
     password: { type: String, required: true },
     phone: { type: String, required: true },
-    role: { type: String, enum: ['rider', 'driver'], default: 'rider' },
+    role: { type: String, enum: ['rider', 'driver', 'admin'], default: 'rider' },
     avatar: { type: String, default: '' },
     verificationStatus: { type: Boolean, default: false },
     isPasswordSet: { type: Boolean, default: false }, // For driver onboarding - tracks if password has been set
