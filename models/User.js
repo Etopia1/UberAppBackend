@@ -33,6 +33,20 @@ const userSchema = new mongoose.Schema({
         lng: Number
     },
     reliabilityScore: { type: Number, default: 5.0 }, // 0 to 5
+    // Driver Vehicle Details
+    vehicle: {
+        make: { type: String },
+        model: { type: String },
+        year: { type: String },
+        plate: { type: String },
+        color: { type: String }
+    },
+
+    // Admin Verification for Drivers
+    driverId: { type: String, unique: true, sparse: true },
+    isDriverVerified: { type: Boolean, default: false },
+    isBanned: { type: Boolean, default: false }, // Moderation
+
 }, { timestamps: true });
 
 module.exports = mongoose.model('User', userSchema);

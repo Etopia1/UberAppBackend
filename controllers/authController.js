@@ -17,7 +17,7 @@ const generateOTP = () => otpGenerator.generate(4, {
 
 exports.signup = async (req, res) => {
     try {
-        const { name, email, password, phone, role } = req.body;
+        const { name, email, password, phone, role, vehicle } = req.body;
 
         const userExists = await User.findOne({ email });
         if (userExists) return res.status(400).json({ message: 'Email already exists' });
@@ -28,8 +28,20 @@ exports.signup = async (req, res) => {
         const otp = generateOTP();
         const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
         console.log(otp);
+        // Generate Driver ID for drivers
+        let driverId = undefined;
+        let isDriverVerified = undefined;
+
+        if (role === 'driver') {
+            driverId = `DRV${Date.now().toString().slice(-6)}${Math.floor(Math.random() * 100)}`;
+            isDriverVerified = false; // Requires Admin Approval
+        }
+
         const newUser = new User({
-            name, email, password: hashedPassword, phone, role, otp, otpExpires
+            name, email, password: hashedPassword, phone, role, otp, otpExpires,
+            vehicle: role === 'driver' ? vehicle : undefined,
+            driverId,
+            isDriverVerified
         });
 
         const savedUser = await newUser.save();
@@ -68,14 +80,55 @@ exports.verifyOTP = async (req, res) => {
 exports.login = async (req, res) => {
     try {
         const { email, password } = req.body;
-        const user = await User.findOne({ email });
+
+        // Allow login by Email OR Driver ID
+        const user = await User.findOne({
+            $or: [{ email: email }, { driverId: email }]
+        });
+
         if (!user) return res.status(400).json({ message: 'User not found' });
 
         const validPass = await bcrypt.compare(password, user.password);
         if (!validPass) return res.status(400).json({ message: 'Invalid password' });
 
+        // Check Verification Status
+        if (!user.verificationStatus) {
+            // Resend OTP so they can verify
+            const otp = generateOTP();
+            user.otp = otp;
+            user.otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+            await user.save();
+
+            // Send email
+            const emailContent = signUpTemplate(otp, user.name);
+            await sendOTP(email, otp, emailContent, 'Verify your account - Driven (Login Attempt)');
+
+            return res.status(403).json({
+                message: 'Account not verified. OTP sent to email.',
+                requiresVerification: true,
+                email: user.email
+            });
+        }
+
+        // Check Admin Verification for Drivers
+        if (user.role === 'driver' && !user.isDriverVerified) {
+            return res.status(403).json({
+                message: 'Your account is pending Admin approval. Please check your email for updates.',
+                requiresAdminApproval: true
+            });
+        }
+
         const token = jwt.sign({ _id: user._id, role: user.role }, process.env.JWT_SECRET);
-        res.json({ token, user: { id: user._id, name: user.name, role: user.role, avatar: user.avatar } });
+        res.json({
+            token,
+            user: {
+                id: user._id,
+                name: user.name,
+                role: user.role,
+                avatar: user.avatar,
+                driverId: user.driverId
+            }
+        });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -139,7 +192,8 @@ exports.googleLogin = async (req, res) => {
                 password: hashedPassword,
                 phone: '', // Google doesn't provide phone by default, user might need to add later
                 role: 'rider',
-                verificationStatus: true
+                verificationStatus: true,
+                isPasswordSet: true
             });
             await user.save();
         }
@@ -156,7 +210,10 @@ exports.googleLogin = async (req, res) => {
 exports.forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;
-        const user = await User.findOne({ email });
+        const user = await User.findOne({
+            $or: [{ email: email }, { driverId: email }]
+        });
+
         if (!user) return res.status(400).json({ message: 'User not found' });
 
         const otp = generateOTP();
@@ -177,7 +234,9 @@ exports.forgotPassword = async (req, res) => {
 exports.verifyResetOTP = async (req, res) => {
     try {
         const { email, otp } = req.body;
-        const user = await User.findOne({ email });
+        const user = await User.findOne({
+            $or: [{ email: email }, { driverId: email }]
+        });
 
         if (!user) return res.status(400).json({ message: 'User not found' });
         if (user.otp !== otp) return res.status(400).json({ message: 'Invalid OTP' });
@@ -208,7 +267,10 @@ exports.verifyResetOTP = async (req, res) => {
 exports.resendOTP = async (req, res) => {
     try {
         const { email, type } = req.body; // type can be 'signup' or 'forgot-password'
-        const user = await User.findOne({ email });
+
+        const user = await User.findOne({
+            $or: [{ email: email }, { driverId: email }]
+        });
 
         if (!user) return res.status(400).json({ message: 'User not found' });
 

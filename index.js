@@ -60,6 +60,7 @@ const walletRoute = require('./routes/wallet');
 const mediaRoute = require('./routes/media');
 const groupRoute = require('./routes/group');
 const driverRoute = require('./routes/driver');
+const adminRoute = require('./routes/admin');
 
 app.use('/api/auth', authRoute);
 app.use('/api/ride', rideRoute);
@@ -73,6 +74,7 @@ app.use('/api/wallet', walletRoute);
 app.use('/api/media', mediaRoute);
 app.use('/api/groups', groupRoute);
 app.use('/api/driver', driverRoute);
+app.use('/api/admin', adminRoute);
 
 // Default route
 app.get('/', (req, res) => res.send('🚀 UberApp Backend Running'));

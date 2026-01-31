@@ -135,4 +135,54 @@ exports.getAllDrivers = async (req, res) => {
     }
 };
 
+// Toggle Driver Availability (Online/Offline)
+exports.toggleAvailability = async (req, res) => {
+    try {
+        const { isOnline } = req.body;
+        const driverId = req.user._id;
+
+        const driver = await User.findByIdAndUpdate(
+            driverId,
+            { isOnline },
+            { new: true }
+        ).select('isOnline name');
+
+        res.json({ message: `You are now ${isOnline ? 'Online' : 'Offline'}`, isOnline: driver.isOnline });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// Admin: Approve Driver
+exports.verifyDriver = async (req, res) => {
+    try {
+        const { userId } = req.body;
+
+        const driver = await User.findById(userId);
+        if (!driver) return res.status(404).json({ message: 'Driver not found' });
+
+        if (driver.role !== 'driver') return res.status(400).json({ message: 'User is not a driver' });
+
+        // Update verification status
+        driver.isDriverVerified = true;
+        await driver.save();
+
+        // Send Approval Email
+        const emailContent = `
+            <h2>Congratulations ${driver.name}! 🎉</h2>
+            <p>Your driver account has been approved by the Admin.</p>
+            <p><strong>Your Unique Driver ID: ${driver.driverId}</strong></p>
+            <p>You can now login using your Email OR this Driver ID.</p>
+            <br/>
+            <p>Drive safe!</p>
+        `;
+
+        await sendOTP(driver.email, null, emailContent, 'Driver Account Approved - Driven');
+
+        res.json({ message: 'Driver approved successfully', driver });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
 module.exports = exports;

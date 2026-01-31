@@ -10,4 +10,8 @@ router.get('/all', auth, driverController.getAllDrivers); // Admin views all dri
 router.post('/check-password-status', driverController.checkPasswordStatus);
 router.post('/set-initial-password', driverController.setInitialPassword);
 
+router.post('/status', auth, driverController.toggleAvailability);
+
+router.post('/approve', auth, driverController.verifyDriver);
+
 module.exports = router;
