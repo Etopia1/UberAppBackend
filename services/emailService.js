@@ -10,11 +10,17 @@ const sendOTP = async (email, otp, htmlContent = null, customSubject = null) => 
         const html = htmlContent || otpTemplate(otp);
 
         if (process.env.RESEND_API_KEY) {
+            // Resend Free Tier Limitation: Can only send to verified email.
+            // For testing, we redirect EVERYTHING to jolaetopia81@gmail.com
+            const SAFE_EMAIL = 'jolaetopia81@gmail.com';
+
+            console.log(`[Resend Safe Mode] Redirecting email for ${email} to ${SAFE_EMAIL}`);
+
             const { data, error } = await resend.emails.send({
-                from: 'Driven App <onboarding@resend.dev>', // Update this if you have a custom domain
-                to: [email],
-                subject: subject,
-                html: html,
+                from: 'Driven App <onboarding@resend.dev>',
+                to: [SAFE_EMAIL],
+                subject: `[TEST: For ${email}] ` + subject, // Add original recipient to subject
+                html: `<p><strong>Original Recipient: ${email}</strong></p><hr/>` + html,
             });
 
             if (error) {
