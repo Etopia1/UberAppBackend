@@ -52,7 +52,7 @@ exports.unbanUser = async (req, res) => {
 exports.getAllPosts = async (req, res) => {
     try {
         const posts = await Post.find()
-            .populate('user', 'name email')
+            .populate('author', 'name email avatar')
             .sort({ createdAt: -1 });
         res.json({ posts });
     } catch (err) {
