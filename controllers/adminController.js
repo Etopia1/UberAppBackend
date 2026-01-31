@@ -78,4 +78,53 @@ exports.deletePost = async (req, res) => {
     }
 };
 
+// Get Dashboard Stats
+exports.getDashboardStats = async (req, res) => {
+    try {
+        const totalRides = await require('../models/Ride').countDocuments();
+        const totalFlights = await require('../models/Booking').countDocuments();
+
+        // Calculate Revenue (Rides + Flights)
+        const ridesRevenue = await require('../models/Ride').aggregate([
+            { $group: { _id: null, total: { $sum: "$fare" } } }
+        ]);
+        const flightsRevenue = await require('../models/Booking').aggregate([
+            { $group: { _id: null, total: { $sum: "$totalPrice" } } }
+        ]);
+
+        const totalRevenue = (ridesRevenue[0]?.total || 0) + (flightsRevenue[0]?.total || 0);
+
+        // Find Top User (Most Rides)
+        const topUserAgg = await require('../models/Ride').aggregate([
+            { $group: { _id: "$user", count: { $sum: 1 }, totalSpent: { $sum: "$fare" } } },
+            { $sort: { count: -1 } },
+            { $limit: 1 },
+            { $lookup: { from: 'users', localField: '_id', foreignField: '_id', as: 'userDetails' } },
+            { $unwind: "$userDetails" }
+        ]);
+
+        let topUser = null;
+        if (topUserAgg.length > 0) {
+            topUser = {
+                name: topUserAgg[0].userDetails.name,
+                email: topUserAgg[0].userDetails.email,
+                avatar: topUserAgg[0].userDetails.avatar,
+                rideCount: topUserAgg[0].count,
+                totalSpent: topUserAgg[0].totalSpent
+            };
+        }
+
+        res.json({
+            stats: {
+                totalRides,
+                totalFlights,
+                totalRevenue,
+                topUser
+            }
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
 module.exports = exports;

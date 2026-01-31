@@ -12,4 +12,6 @@ router.post('/unban-user', auth, adminController.unbanUser);
 router.get('/posts', auth, adminController.getAllPosts);
 router.post('/delete-post', auth, adminController.deletePost);
 
+router.get('/stats', auth, adminController.getDashboardStats);
+
 module.exports = router;
