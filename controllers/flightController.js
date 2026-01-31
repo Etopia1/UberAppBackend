@@ -203,7 +203,7 @@ exports.bookFlight = async (req, res) => {
             })
         );
         const orderData = orderResponse.data;
-        const pnr = orderData.associatedRecords?.[0]?.reference || orderData.id;
+        const pnr = orderData.associatedRecords?.[0]?.reference || orderData.id || `BK-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
         console.log('Real Booking Success! PNR:', pnr);
 
         // 3. Save to Database

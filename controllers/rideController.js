@@ -30,10 +30,9 @@ exports.requestRide = async (req, res) => {
         const savedRide = await newRide.save();
 
         // --- MATCHMAKING LOGIC ---
-        // 1. Find Online Drivers
-        // In a real app, use Geospatial query ($near).
-        // For now, find ANY driver who is 'isOnline: true' and 'role: driver'
-        const onlineDrivers = await User.find({ role: 'driver', isOnline: true });
+        // 1. Find Drivers (BROAD SEARCH FOR TESTING)
+        // Finding ALL drivers to ensure notification goes through during dev/test
+        const onlineDrivers = await User.find({ role: 'driver' }); // Removed isOnline strict check for testing
 
         // 2. Emit Socket Event to these drivers
         // require socket instance (assuming it's exported or available via global/app)
