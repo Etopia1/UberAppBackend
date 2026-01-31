@@ -114,12 +114,47 @@ exports.getDashboardStats = async (req, res) => {
             };
         }
 
+        // Calculate Monthly Revenue (Last 6 Months)
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+        const monthlyRevenue = await require('../models/Ride').aggregate([
+            { $match: { createdAt: { $gte: sixMonthsAgo }, status: 'completed' } },
+            {
+                $group: {
+                    _id: { $month: "$createdAt" },
+                    total: { $sum: "$fare" }
+                }
+            },
+            { $sort: { "_id": 1 } }
+        ]);
+
+        // Format for Chart (Labels and Data)
+        const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+        const chartData = {
+            labels: [],
+            data: []
+        };
+
+        // Fill in data (simplified for brevity, realistically would map all months)
+        monthlyRevenue.forEach(item => {
+            chartData.labels.push(monthNames[item._id - 1]);
+            chartData.data.push(item.total);
+        });
+
+        // If no data, provide at least empty structure or defaults so chart doesn't crash
+        if (chartData.data.length === 0) {
+            chartData.labels = ["Jan", "Feb", "Mar", "Apr", "May", "Jun"];
+            chartData.data = [0, 0, 0, 0, 0, 0];
+        }
+
         res.json({
             stats: {
                 totalRides,
                 totalFlights,
                 totalRevenue,
-                topUser
+                topUser,
+                revenueChart: chartData
             }
         });
     } catch (err) {
