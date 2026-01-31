@@ -29,9 +29,40 @@ exports.requestRide = async (req, res) => {
 
         const savedRide = await newRide.save();
 
+        // --- MATCHMAKING LOGIC ---
+        // 1. Find Online Drivers
+        // In a real app, use Geospatial query ($near).
+        // For now, find ANY driver who is 'isOnline: true' and 'role: driver'
+        const onlineDrivers = await User.find({ role: 'driver', isOnline: true });
+
+        // 2. Emit Socket Event to these drivers
+        // require socket instance (assuming it's exported or available via global/app)
+        // If socket.io object is attached to 'req.app.get("io")', use that.
+        const io = req.app.get('io');
+
+        if (io && onlineDrivers.length > 0) {
+            console.log(`Notifying ${onlineDrivers.length} online drivers...`);
+            onlineDrivers.forEach(driver => {
+                // Emit to the specific driver's room (User Room Convention: 'user_' + ID)
+                io.to(`user_${driver._id}`).emit('new_ride_request', {
+                    rideId: savedRide._id,
+                    pickup: savedRide.pickup,
+                    dropoff: savedRide.dropoff,
+                    fare: savedRide.fare,
+                    user: {
+                        name: req.user ? req.user.name : "Passenger",
+                        rating: 4.8 // Mock rating
+                    }
+                });
+            });
+        } else {
+            console.log('No online drivers found or Socket IO not available.');
+        }
+
         res.status(201).json({
             message: 'Ride requested successfully',
-            ride: savedRide
+            ride: savedRide,
+            driversNotified: onlineDrivers.length
         });
     } catch (error) {
         console.error('Request ride error:', error);
